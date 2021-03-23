@@ -22,6 +22,7 @@ Abstract:
 #include <random>
 #include <sstream>
 #include <mlas.h>
+#include <vector>
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -562,6 +563,7 @@ protected:
         size_t M,
         size_t N,
         size_t K,
+        size_t BatchSize,
         const uint8_t* A,
         size_t lda,
         uint8_t offa,
@@ -573,28 +575,31 @@ protected:
         size_t ldc
         )
     {
-        MLAS_GEMM_U8X8_PARAMETERS GemmParameters;
+        std::vector<MLAS_GEMM_U8X8_PARAMETERS> GemmParameters(BatchSize);
 
-        GemmParameters.M = M;
-        GemmParameters.N = N;
-        GemmParameters.K = K;
-        GemmParameters.A = A;
-        GemmParameters.lda = lda;
-        GemmParameters.ZeroPointA = offa;
-        GemmParameters.ZeroPointB = &offb;
-        GemmParameters.BIsSigned = BIsSigned;
-        GemmParameters.C = C;
-        GemmParameters.ldc = ldc;
+        for (size_t i = 0; i < GemmParameters.size(); i++) {
+            auto& params = GemmParameters[i];
+            params.M = M;
+            params.N = N;
+            params.K = K;
+            params.A = A + (M * K * i);
+            params.lda = lda;
+            params.ZeroPointA = offa;
+            params.ZeroPointB = &offb;
+            params.BIsSigned = BIsSigned;
+            params.C = C + (M * N * i);
+            params.ldc = ldc;
 
-        if (Packed) {
-            GemmParameters.B = PackB(N, K, B, ldb, BIsSigned);
-            GemmParameters.BIsPacked = true;
-        } else {
-            GemmParameters.B = B;
-            GemmParameters.ldb = ldb;
+            if (Packed) {
+                params.B = PackB(N, K, B, ldb, BIsSigned);
+                params.BIsPacked = true;
+            } else {
+                params.B = B + (K * N * i);
+                params.ldb = ldb;
+            }
         }
 
-        MlasGemm(&GemmParameters, threadpool);
+        MlasGemmBatch(GemmParameters.data(), BatchSize, threadpool);
     }
 
     void
@@ -602,6 +607,7 @@ protected:
         size_t M,
         size_t N,
         size_t K,
+        size_t BatchSize,
         const uint8_t* A,
         size_t lda,
         uint8_t offa,
@@ -613,29 +619,32 @@ protected:
         size_t ldc
         )
     {
-        MLAS_GEMM_U8X8_PARAMETERS GemmParameters;
+        std::vector<MLAS_GEMM_U8X8_PARAMETERS> GemmParameters(BatchSize);
 
-        GemmParameters.M = M;
-        GemmParameters.N = N;
-        GemmParameters.K = K;
-        GemmParameters.A = A;
-        GemmParameters.lda = lda;
-        GemmParameters.ZeroPointA = offa;
-        GemmParameters.ZeroPointB = offb;
-        GemmParameters.BIsSigned = BIsSigned;
-        GemmParameters.PerColumnZeroPoints = true;
-        GemmParameters.C = C;
-        GemmParameters.ldc = ldc;
+        for (size_t i = 0; i < GemmParameters.size(); i++) {
+            auto& params = GemmParameters[i];
+            params.M = M;
+            params.N = N;
+            params.K = K;
+            params.A = A + M * K * i;
+            params.lda = lda;
+            params.ZeroPointA = offa;
+            params.ZeroPointB = offb;
+            params.BIsSigned = BIsSigned;
+            params.PerColumnZeroPoints = true;
+            params.C = C + M * N * i;
+            params.ldc = ldc;
 
-        if (Packed) {
-            GemmParameters.B = PackB(N, K, B, ldb, BIsSigned);
-            GemmParameters.BIsPacked = true;
-        } else {
-            GemmParameters.B = B;
-            GemmParameters.ldb = ldb;
+            if (Packed) {
+              params.B = PackB(N, K, B, ldb, BIsSigned);
+              params.BIsPacked = true;
+            } else {
+              params.B = B + K * N * i;
+              params.ldb = ldb;
+            }
         }
 
-        MlasGemm(&GemmParameters, threadpool);
+        MlasGemmBatch(GemmParameters.data(), BatchSize, threadpool);
     }
 
     void
@@ -643,6 +652,7 @@ protected:
         size_t M,
         size_t N,
         size_t K,
+        size_t BatchSize,
         const uint8_t* A,
         size_t lda,
         uint8_t offa,
@@ -656,31 +666,36 @@ protected:
         const float* Bias
         )
     {
-        MLAS_QGEMM_SCALE_BIAS_OUTPUT_PROCESSOR ScaleBiasProcessor(C, ldc, &CScale, Bias);
+        std::vector<MLAS_QGEMM_SCALE_BIAS_OUTPUT_PROCESSOR> ScaleBiasProcessors;
+        ScaleBiasProcessors.reserve(BatchSize);
 
-        MLAS_GEMM_U8X8_PARAMETERS GemmParameters;
+        std::vector<MLAS_GEMM_U8X8_PARAMETERS> GemmParameters(BatchSize);
 
-        GemmParameters.M = M;
-        GemmParameters.N = N;
-        GemmParameters.K = K;
-        GemmParameters.A = A;
-        GemmParameters.lda = lda;
-        GemmParameters.ZeroPointA = offa;
-        GemmParameters.ZeroPointB = &offb;
-        GemmParameters.BIsSigned = BIsSigned;
-        GemmParameters.C = reinterpret_cast<int32_t*>(C);
-        GemmParameters.ldc = ldc;
-        GemmParameters.OutputProcessor = &ScaleBiasProcessor;
+        for (size_t i = 0; i < BatchSize; i++) {
+            auto& params = GemmParameters[i];
+            params.M = M;
+            params.N = N;
+            params.K = K;
+            params.A = A + M * K * i;
+            params.lda = lda;
+            params.ZeroPointA = offa;
+            params.ZeroPointB = &offb;
+            params.BIsSigned = BIsSigned;
+            params.C = reinterpret_cast<int32_t*>(C + M * N * i);
+            params.ldc = ldc;
 
-        if (Packed) {
-            GemmParameters.B = PackB(N, K, B, ldb, BIsSigned);
-            GemmParameters.BIsPacked = true;
-        } else {
-            GemmParameters.B = B;
-            GemmParameters.ldb = ldb;
+            if (Packed) {
+                params.B = PackB(N, K, B, ldb, BIsSigned);
+                params.BIsPacked = true;
+            } else {
+                params.B = B + K * N * i;
+                params.ldb = ldb;
+            }
+            ScaleBiasProcessors.emplace_back(C + M * N * i, ldc, &CScale, Bias);
+            params.OutputProcessor = &(ScaleBiasProcessors[i]);
         }
 
-        MlasGemm(&GemmParameters, threadpool);
+        MlasGemmBatch(GemmParameters.data(), BatchSize, threadpool);
     }
 
 private:
@@ -699,16 +714,17 @@ private:
         size_t M,
         size_t N,
         size_t K,
+        size_t BatchSize,
         uint8_t offa,
         uint8_t offb
         )
     {
-        const uint8_t* A = BufferA.GetBuffer(K * M);
-        const uint8_t* B = BufferB.GetBuffer(N * K);
-        int32_t* C = BufferC.GetBuffer(N * M);
-        int32_t* CReference = BufferCReference.GetBuffer(N * M);
+        const uint8_t* A = BufferA.GetBuffer(K * M * BatchSize);
+        const uint8_t* B = BufferB.GetBuffer(N * K * BatchSize);
+        int32_t* C = BufferC.GetBuffer(N * M * BatchSize);
+        int32_t* CReference = BufferCReference.GetBuffer(N * M * BatchSize);
 
-        Test(M, N, K, A, K, offa, B, N, offb, C, CReference, N);
+        Test(M, N, K, BatchSize, A, K, offa, B, N, offb, C, CReference, N);
     }
 
     void
@@ -716,16 +732,17 @@ private:
         size_t M,
         size_t N,
         size_t K,
+        size_t BatchSize,
         uint8_t offa
         )
     {
-        const uint8_t* A = BufferA.GetBuffer(K * M);
-        const uint8_t* B = BufferB.GetBuffer(N * K);
+        const uint8_t* A = BufferA.GetBuffer(K * M * BatchSize);
+        const uint8_t* B = BufferB.GetBuffer(N * K * BatchSize);
         const uint8_t* ZeroPointB = BufferZeroPointB.GetBuffer(N);
-        int32_t* C = BufferC.GetBuffer(N * M);
-        int32_t* CReference = BufferCReference.GetBuffer(N * M);
+        int32_t* C = BufferC.GetBuffer(N * M * BatchSize);
+        int32_t* CReference = BufferCReference.GetBuffer(N * M * BatchSize);
 
-        Test(M, N, K, A, K, offa, B, N, ZeroPointB, C, CReference, N);
+        Test(M, N, K, BatchSize, A, K, offa, B, N, ZeroPointB, C, CReference, N);
     }
 
     void
@@ -733,6 +750,7 @@ private:
         size_t M,
         size_t N,
         size_t K,
+        size_t BatchSize,
         const uint8_t* A,
         size_t lda,
         uint8_t offa,
@@ -744,13 +762,13 @@ private:
         size_t ldc
         )
     {
-        std::fill_n(C, M * N, -1);
-        std::fill_n(CReference, M * N, -1);
+        std::fill_n(C, M * N * BatchSize, -1);
+        std::fill_n(CReference, M * N * BatchSize, -1);
 
-        this->TestGemm(M, N, K, A, lda, offa, B, ldb, offb, BIsSigned, C, ldc);
-        ReferenceQgemm(M, N, K, A, lda, offa, (const xint8_t*)B, ldb, (xint8_t)offb, CReference, ldc);
+        this->TestGemm(M, N, K, BatchSize, A, lda, offa, B, ldb, offb, BIsSigned, C, ldc);
+        ReferenceQgemm(M, N, K, BatchSize, A, lda, offa, (const xint8_t*)B, ldb, (xint8_t)offb, CReference, ldc);
 
-        for (size_t f = 0; f < M * N; f++) {
+        for (size_t f = 0; f < M * N * BatchSize; f++) {
             if (C[f] != CReference[f]) {
                 printf("mismatch M=%zd, N=%zd, K=%zd, offa=%d, offb=%d!\n", M, N, K, int(offa), int(offb));
                 break;
@@ -763,6 +781,7 @@ private:
         size_t M,
         size_t N,
         size_t K,
+        size_t BatchSize,
         const uint8_t* A,
         size_t lda,
         uint8_t offa,
@@ -774,13 +793,13 @@ private:
         size_t ldc
         )
     {
-        std::fill_n(C, M * N, -1);
-        std::fill_n(CReference, M * N, -1);
+        std::fill_n(C, M * N * BatchSize, -1);
+        std::fill_n(CReference, M * N* BatchSize, -1);
 
-        this->TestGemm(M, N, K, A, lda, offa, B, ldb, offb, BIsSigned, C, ldc);
-        ReferenceQgemm(M, N, K, A, lda, offa, (const xint8_t*)B, ldb, (const xint8_t*)offb, CReference, ldc);
+        this->TestGemm(M, N, K, BatchSize, A, lda, offa, B, ldb, offb, BIsSigned, C, ldc);
+        ReferenceQgemm(M, N, K, BatchSize, A, lda, offa, (const xint8_t*)B, ldb, (const xint8_t*)offb, CReference, ldc);
 
-        for (size_t f = 0; f < M * N; f++) {
+        for (size_t f = 0; f < M * N * BatchSize; f++) {
             if (C[f] != CReference[f]) {
                 printf("mismatch M=%zd, N=%zd, K=%zd, offa=%d!\n", M, N, K, int(offa));
                 break;
@@ -793,6 +812,7 @@ private:
         size_t M,
         size_t N,
         size_t K,
+        size_t BatchSize,
         const uint8_t* A,
         size_t lda,
         uint8_t offa,
@@ -803,22 +823,25 @@ private:
         size_t ldc
         )
     {
-        for (size_t m = 0; m < M; m++) {
+        for (size_t batch = 0; batch < BatchSize; batch++) {
+      
+            for (size_t m = 0; m < M; m++) {
 
-            for (size_t n = 0; n < N; n++) {
+                for (size_t n = 0; n < N; n++) {
 
-                const uint8_t* a = A + (m * lda);
-                const xint8_t* b = B + n;
-                int32_t* c = C + (m * ldc) + n;
-                int32_t sum = 0;
+                    const uint8_t* a = A + (M * K * batch) + (m * lda);
+                    const xint8_t* b = B + (K * N * batch) + n;
+                    int32_t* c = C + (M * N * batch) + (m * ldc) + n;
+                    int32_t sum = 0;
 
-                for (size_t k = 0; k < K; k++) {
-                    sum += ((int32_t(*b) - offb) * (int32_t(*a) - offa));
-                    b += ldb;
-                    a += 1;
+                    for (size_t k = 0; k < K; k++) {
+                        sum += ((int32_t(*b) - offb) * (int32_t(*a) - offa));
+                        b += ldb;
+                        a += 1;
+                    }
+
+                    *c = sum;
                 }
-
-                *c = sum;
             }
         }
     }
@@ -828,6 +851,7 @@ private:
         size_t M,
         size_t N,
         size_t K,
+        size_t BatchSize,
         const uint8_t* A,
         size_t lda,
         uint8_t offa,
@@ -838,22 +862,25 @@ private:
         size_t ldc
         )
     {
-        for (size_t m = 0; m < M; m++) {
+        for (size_t batch = 0; batch < BatchSize; batch++) {
 
-            for (size_t n = 0; n < N; n++) {
+            for (size_t m = 0; m < M; m++) {
 
-                const uint8_t* a = A + (m * lda);
-                const xint8_t* b = B + n;
-                int32_t* c = C + (m * ldc) + n;
-                int32_t sum = 0;
+                for (size_t n = 0; n < N; n++) {
 
-                for (size_t k = 0; k < K; k++) {
-                    sum += ((int32_t(*b) - offb[n]) * (int32_t(*a) - offa));
-                    b += ldb;
-                    a += 1;
+                    const uint8_t* a = A + (M * K * batch) + (m * lda);
+                    const xint8_t* b = B + (K * N * batch) + n;
+                    int32_t* c = C + (M * N * batch) + (m * ldc) + n;
+                    int32_t sum = 0;
+
+                    for (size_t k = 0; k < K; k++) {
+                        sum += ((int32_t(*b) - offb[n]) * (int32_t(*a) - offa));
+                        b += ldb;
+                        a += 1;
+                    }
+
+                    *c = sum;
                 }
-
-                *c = sum;
             }
         }
     }
@@ -872,28 +899,38 @@ public:
         ) override
     {
         for (size_t b = 1; b < 16; b++) {
-            Test(b, b, b, 14, 211);
-            Test(b, b, b, 21);
+            Test(b, b, b, 1, 14, 211);
+            if (!Packed) {
+                Test(b, b, b, 4, 14, 211);
+            }
+            Test(b, b, b, 1, 21);
+            if (!Packed) {
+              Test(b, b, b, 3, 21);
+            }
         }
         for (size_t b = 1; b < 16; b++) {
-            Test(b, b, b, 14, 211);
-            Test(b, b, b, 17);
+            Test(b, b, b, 1, 14, 211);
+            Test(b, b, b, 1, 17);
         }
         for (size_t b = 16; b <= 256; b <<= 1) {
-            Test(b, b, b, 34, 1);
-            Test(b, b, b, 1);
+            Test(b, b, b, 1, 34, 1);
+            Test(b, b, b, 1, 1);
         }
         for (size_t b = 256; b < 320; b += 32) {
-            Test(b, b, b, 85, 173);
+            Test(b, b, b, 1, 85, 173);
         }
         for (size_t b = 1; b < 96; b++) {
-            Test(1, b, 32, 0, 0);
-            Test(1, 32, b, 0, 0);
-            Test(1, b, b, 0, 0);
+            Test(1, b, 32, 1, 0, 0);
+            Test(1, 32, b, 1, 0, 0);
+            Test(1, b, b, 1, 0, 0);
         }
-        Test(43, 500, 401, 183, 223);
-        Test(1023, 1023, 1023, 5, 8);
-        Test(1023, 1023, 1023, 7);
+        Test(43, 500, 401, 1, 183, 223);
+        Test(1023, 1023, 1023, 1, 5, 8);
+        Test(1023, 1023, 1023, 1, 7);
+        if (!Packed) {
+            Test(43, 500, 401, 9, 183, 223);
+            Test(1023, 1023, 1023, 13, 5, 8);
+        }
     }
 
     void
@@ -916,21 +953,26 @@ public:
                         for (size_t k = 0; k < _countof(ks); k++) {
                             size_t K = ks[k];
 
-                            Test(M, N, K, offa, offb);
-                            Test(M + 1, N, K, offa, offb);
-                            Test(M, N + 1, K, offa, offb);
-                            Test(M + 1, N + 1, K, offa, offb);
-                            Test(M + 3, N + 2, K, offa, offb);
-                            Test(M + 4, N, K, offa, offb);
-                            Test(M, N + 4, K, offa, offb);
-                            Test(M + 4, N + 4, K, offa, offb);
-                            Test(M + 3, N + 7, K, offa, offb);
-                            Test(M + 8, N, K, offa, offb);
-                            Test(M, N + 8, K, offa, offb);
-                            Test(M + 12, N + 12, K, offa, offb);
-                            Test(M + 13, N, K, offa, offb);
-                            Test(M, N + 15, K, offa, offb);
-                            Test(M + 15, N + 15, K, offa, offb);
+                            Test(M, N, K, 1, offa, offb);
+                            Test(M + 1, N, K, 1, offa, offb);
+                            Test(M, N + 1, K, 1, offa, offb);
+                            Test(M + 1, N + 1, K, 1, offa, offb);
+                            Test(M + 3, N + 2, K, 1, offa, offb);
+                            Test(M + 4, N, K, 1, offa, offb);
+                            Test(M, N + 4, K, 1, offa, offb);
+                            Test(M + 4, N + 4, K, 1, offa, offb);
+                            Test(M + 3, N + 7, K, 1, offa, offb);
+                            Test(M + 8, N, K, 1, offa, offb);
+                            Test(M, N + 8, K, 1, offa, offb);
+                            Test(M + 12, N + 12, K, 1, offa, offb);
+                            Test(M + 13, N, K, 1, offa, offb);
+                            Test(M, N + 15, K, 1, offa, offb);
+                            Test(M + 15, N + 15, K, 1, offa, offb);
+                            if (!Packed) {
+                                Test(M, N, K, 7 + a, offa, offb);
+                                Test(M + 3, N, K, 7 + a, offa, offb);
+                                Test(M, N + 1, K, 7 + a, offa, offb);
+                            }
                         }
                     }
                     printf("a %zd/%zd b %zd/%zd M %zd\n", a, _countof(zero_points), b, _countof(zero_points), M);
@@ -941,7 +983,7 @@ public:
         for (size_t M = 1; M < 160; M++) {
             for (size_t N = 1; N < 160; N++) {
                 for (size_t K = 1; K < 160; K++) {
-                    Test(M, N, K, 18, 24);
+                    Test(M, N, K, 1, 18, 24);
                 }
             }
             printf("M %zd\n", M);
@@ -950,10 +992,10 @@ public:
         for (size_t M = 160; M < 320; M += 24) {
             for (size_t N = 112; N < 320; N += 24) {
                 for (size_t K = 1; K < 16; K++) {
-                    Test(M, N, K, 1, 3);
+                    Test(M, N, K, 1, 1, 3);
                 }
                 for (size_t K = 16; K < 160; K += 32) {
-                    Test(M, N, K, 5, 7);
+                    Test(M, N, K, 1, 5, 7);
                 }
             }
             printf("M %zd\n", M);
@@ -970,28 +1012,33 @@ private:
         size_t M,
         size_t N,
         size_t K,
+        size_t BatchSize,
         uint8_t offa,
         uint8_t offb
         )
     {
-        const uint8_t* A = BufferA.GetBuffer(K * M);
-        const uint8_t* B = BufferB.GetBuffer(N * K);
-        float* C = BufferC.GetBuffer(N * M);
-        float* CReference = BufferCReference.GetBuffer(N * M);
+        const uint8_t* A = BufferA.GetBuffer(K * M * BatchSize);
+        const uint8_t* B = BufferB.GetBuffer(N * K * BatchSize);
+        float* C = BufferC.GetBuffer(N * M * BatchSize);
+        float* CReference = BufferCReference.GetBuffer(N * M * BatchSize);
         const float* Bias = BufferBias.GetBuffer(N);
 
         const float AScale = 0.5f;
-        float* AFloat = BufferAFloat.GetBuffer(K * M);
-        DequantizeLinear(A, AFloat, K * M, AScale, offa);
+        float* AFloat = BufferAFloat.GetBuffer(K * M * BatchSize);
+        for (size_t b = 0; b < BatchSize; b++) {
+            DequantizeLinear(A + K * M * b, AFloat + K * M * b, K * M, AScale, offa);
+        }
 
         const float BScale = 0.25f;
-        float* BFloat = BufferBFloat.GetBuffer(N * K);
-        DequantizeLinear((xint8_t*)B, BFloat, N * K, BScale, xint8_t(offb));
+        float* BFloat = BufferBFloat.GetBuffer(N * K * BatchSize);
+        for (size_t b = 0; b < BatchSize; b++) {
+            DequantizeLinear((xint8_t*)(B + N * K * b), BFloat + N * K * b, N * K, BScale, xint8_t(offb));
+        }
 
         const float CScale = AScale * BScale;
 
-        Test(M, N, K, A, AFloat, K, offa, B, BFloat, N, offb, C, CReference, N, CScale, nullptr);
-        Test(M, N, K, A, AFloat, K, offa, B, BFloat, N, offb, C, CReference, N, CScale, Bias);
+        Test(M, N, K, BatchSize, A, AFloat, K, offa, B, BFloat, N, offb, C, CReference, N, CScale, nullptr);
+        Test(M, N, K, BatchSize, A, AFloat, K, offa, B, BFloat, N, offb, C, CReference, N, CScale, Bias);
     }
 
     void
@@ -999,6 +1046,7 @@ private:
         size_t M,
         size_t N,
         size_t K,
+        size_t BatchSize,
         const uint8_t* A,
         const float* AFloat,
         size_t lda,
@@ -1014,19 +1062,26 @@ private:
         const float* Bias
         )
     {
-        MlasGemm(CblasNoTrans, CblasNoTrans, M, N, K, 1.0f, AFloat, lda, BFloat, ldb, 0.0f, CReference, ldc, threadpool);
+        for (size_t b = 0; b < BatchSize; b++) {
+            MlasGemm(CblasNoTrans, CblasNoTrans, M, N, K, 1.0f,
+                AFloat + K * M * b, lda,
+                BFloat + N * K * b, ldb, 0.0f, 
+                CReference + N * M * b, ldc, threadpool);  
+        }
 
         if (Bias != nullptr) {
-            for (size_t m = 0; m < M; m++) {
-                for (size_t n = 0; n < N; n++) {
-                    CReference[m * ldc + n] += Bias[n];
+            for (size_t b = 0; b < BatchSize; b++) {
+                for (size_t m = 0; m < M; m++) {
+                    for (size_t n = 0; n < N; n++) {
+                        CReference[N * M * b + m * ldc + n] += Bias[n];
+                    }
                 }
             }
         }
 
-        this->TestGemm(M, N, K, A, lda, offa, B, ldb, offb, BIsSigned, C, ldc, CScale, Bias);
+        this->TestGemm(M, N, K, BatchSize, A, lda, offa, B, ldb, offb, BIsSigned, C, ldc, CScale, Bias);
 
-        for (size_t f = 0; f < M * N; f++) {
+        for (size_t f = 0; f < M * N * BatchSize; f++) {
             // Sensitive to comparing positive/negative zero.
             if (C[f] != CReference[f]) {
                 printf("mismatch M=%zd, N=%zd, K=%zd, offa=%d, offb=%d! %f %f\n", M, N, K, int(offa), int(offb), C[f], CReference[f]);
@@ -1066,19 +1121,25 @@ public:
         ) override
     {
         for (size_t b = 1; b < 16; b++) {
-            Test(b, b, b, 34, 46);
+            Test(b, b, b, 1, 34, 46);
         }
         for (size_t b = 16; b <= 256; b <<= 1) {
-            Test(b, b, b, 15, 191);
+            Test(b, b, b, 1, 15, 191);
         }
         for (size_t b = 256; b < 320; b += 32) {
-            Test(b, b, b, 223, 73);
+            Test(b, b, b, 1, 223, 73);
         }
         for (size_t b = 1; b < 96; b++) {
-            Test(1, b, 32, 0, 0);
+            Test(1, b, 32, 1, 0, 0);
         }
-        Test(43, 503, 401, 183, 223);
-        Test(1024, 1024, 256, 13, 15);
+        Test(43, 503, 401, 1, 183, 223);
+        Test(1024, 1024, 256, 1, 13, 15);
+        if (!Packed) {
+            Test(8, 8, 16, 4, 34, 46);
+            Test(13, 117, 47, 29, 15, 191);
+            Test(43, 503, 401, 4, 183, 223);
+            Test(1024, 1024, 256, 5, 13, 15);  
+        }
     }
 };
 
