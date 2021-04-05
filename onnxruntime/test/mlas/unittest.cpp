@@ -575,18 +575,20 @@ protected:
         size_t ldc
         )
     {
-        std::vector<MLAS_GEMM_U8X8_PARAMETERS> GemmParameters(BatchSize);
+        MLAS_GEMM_U8X8_SHAPE_PARAMS GemmShape;
+        GemmShape.M = M;
+        GemmShape.N = N;
+        GemmShape.K = K;
+        GemmShape.BIsSigned = BIsSigned;
+
+        std::vector<MLAS_GEMM_U8X8_DATA_PARAMS> GemmParameters(BatchSize);
 
         for (size_t i = 0; i < GemmParameters.size(); i++) {
             auto& params = GemmParameters[i];
-            params.M = M;
-            params.N = N;
-            params.K = K;
             params.A = A + (M * K * i);
             params.lda = lda;
             params.ZeroPointA = offa;
             params.ZeroPointB = &offb;
-            params.BIsSigned = BIsSigned;
             params.C = C + (M * N * i);
             params.ldc = ldc;
 
@@ -599,7 +601,7 @@ protected:
             }
         }
 
-        MlasGemmBatch(GemmParameters.data(), BatchSize, threadpool);
+        MlasGemmBatch(GemmShape, GemmParameters.data(), BatchSize, threadpool);
     }
 
     void
@@ -619,18 +621,20 @@ protected:
         size_t ldc
         )
     {
-        std::vector<MLAS_GEMM_U8X8_PARAMETERS> GemmParameters(BatchSize);
+        MLAS_GEMM_U8X8_SHAPE_PARAMS GemmShape;
+        GemmShape.M = M;
+        GemmShape.N = N;
+        GemmShape.K = K;
+        GemmShape.BIsSigned = BIsSigned;
+
+        std::vector<MLAS_GEMM_U8X8_DATA_PARAMS> GemmParameters(BatchSize);
 
         for (size_t i = 0; i < GemmParameters.size(); i++) {
             auto& params = GemmParameters[i];
-            params.M = M;
-            params.N = N;
-            params.K = K;
             params.A = A + M * K * i;
             params.lda = lda;
             params.ZeroPointA = offa;
             params.ZeroPointB = offb;
-            params.BIsSigned = BIsSigned;
             params.PerColumnZeroPoints = true;
             params.C = C + M * N * i;
             params.ldc = ldc;
@@ -644,7 +648,7 @@ protected:
             }
         }
 
-        MlasGemmBatch(GemmParameters.data(), BatchSize, threadpool);
+        MlasGemmBatch(GemmShape, GemmParameters.data(), BatchSize, threadpool);
     }
 
     void
@@ -666,21 +670,23 @@ protected:
         const float* Bias
         )
     {
+        MLAS_GEMM_U8X8_SHAPE_PARAMS GemmShape;
+        GemmShape.M = M;
+        GemmShape.N = N;
+        GemmShape.K = K;
+        GemmShape.BIsSigned = BIsSigned;
+
         std::vector<MLAS_QGEMM_SCALE_BIAS_OUTPUT_PROCESSOR> ScaleBiasProcessors;
         ScaleBiasProcessors.reserve(BatchSize);
 
-        std::vector<MLAS_GEMM_U8X8_PARAMETERS> GemmParameters(BatchSize);
+        std::vector<MLAS_GEMM_U8X8_DATA_PARAMS> GemmParameters(BatchSize);
 
         for (size_t i = 0; i < BatchSize; i++) {
             auto& params = GemmParameters[i];
-            params.M = M;
-            params.N = N;
-            params.K = K;
             params.A = A + M * K * i;
             params.lda = lda;
             params.ZeroPointA = offa;
             params.ZeroPointB = &offb;
-            params.BIsSigned = BIsSigned;
             params.C = reinterpret_cast<int32_t*>(C + M * N * i);
             params.ldc = ldc;
 
@@ -695,7 +701,7 @@ protected:
             params.OutputProcessor = &(ScaleBiasProcessors[i]);
         }
 
-        MlasGemmBatch(GemmParameters.data(), BatchSize, threadpool);
+        MlasGemmBatch(GemmShape, GemmParameters.data(), BatchSize, threadpool);
     }
 
 private:
