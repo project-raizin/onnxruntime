@@ -3860,12 +3860,15 @@ TEST_F(GraphTransformationTests, PropagateCastOp) {
   int i=0;
   for (const auto& model_uri : model_uris) {
     std::shared_ptr<Model> p_model;
+    std::cout << "i=" << i << std::endl;
     ASSERT_STATUS_OK(Model::Load(model_uri, p_model, nullptr, *logger_));
+    std::cout << "Loaded model : p_model=" << p_model << std::endl;
     Graph& graph = p_model->MainGraph();
     ASSERT_STATUS_OK(graph.Resolve());
     onnxruntime::GraphTransformerManager graph_transformation_mgr{5};
     ASSERT_STATUS_OK(graph_transformation_mgr.Register(
         onnxruntime::make_unique<PropagateCastOps>(1), TransformerLevel::Level1));
+    std::cout << "Calling ApplyTransformers" << std::endl;
     ASSERT_STATUS_OK(graph_transformation_mgr.ApplyTransformers(graph, TransformerLevel::Level1, *logger_));
 
     std::map<std::string, int> op_to_count = CountOpsInGraph(graph);
