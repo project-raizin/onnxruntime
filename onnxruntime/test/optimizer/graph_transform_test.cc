@@ -3847,6 +3847,7 @@ TEST_F(GraphTransformationTests, FilterEnabledOptimizers) {
   ASSERT_TRUE(op_to_count["Add"] == 1);
 }
 
+#ifndef DISABLE_CONTRIB_OPS
 TEST_F(GraphTransformationTests, PropagateCastOp) {
   // Any change in the order of the test models will effect the assertions.
   // The expected casts also need to be changed
@@ -3872,6 +3873,7 @@ TEST_F(GraphTransformationTests, PropagateCastOp) {
     ++i;
   }
 }
+#endif
 
 }  // namespace test
 }  // namespace onnxruntime
