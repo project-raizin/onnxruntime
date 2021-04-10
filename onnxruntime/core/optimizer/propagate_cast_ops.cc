@@ -330,14 +330,6 @@ static bool PropagateForwards(Graph& graph, Node* node,
         modified = true;
       }
     }
-  } else {
-    for (NodeArg* output: node->MutableOutputDefs()) {
-      for (Node* consumer : graph.GetMutableConsumerNodes(output->Name())) {
-        if (std::find(removed_nodes.begin(), removed_nodes.end(), consumer->Index()) == removed_nodes.end()) {
-          modified |= PropagateForwards(graph, consumer, removed_nodes, logger);
-        }
-      }
-    }
   }
   return modified;
 }
@@ -377,14 +369,6 @@ static bool PropagateBackwards(Graph& graph, Node* node,
         std::cout << "PropagateBackwards: Changed the type from float to float16 : "
                   << GatherNames<std::unordered_set<NodeArg*>>(require_type_change) << std::endl;
         modified = true;
-      }
-    }
-  } else {
-    for (NodeArg* input: node->MutableInputDefs()) {
-      Node* producer = graph.GetMutableProducerNode(input->Name());
-      if (producer != nullptr &&
-          std::find(removed_nodes.begin(), removed_nodes.end(), producer->Index()) == removed_nodes.end()) {
-         modified |= PropagateBackwards(graph, producer, removed_nodes, logger);
       }
     }
   }
