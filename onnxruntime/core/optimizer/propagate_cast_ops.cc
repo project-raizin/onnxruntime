@@ -584,17 +584,19 @@ static bool PropagateFP16CastsFromOutputsToInputs(Graph& graph, Node* node,
 // 3. Propagate fp16 casts back
 Status PropagateCastOps::ApplyImpl(Graph& graph, bool& modified, int graph_level, const logging::Logger& logger) const {
   // First apply the transformation to the subgraphs.
-  GraphViewer graph_viewer(graph);
-  const auto& node_topology_list = graph_viewer.GetNodesInTopologicalOrder();
+  {
+    GraphViewer graph_viewer(graph);
+    const auto& node_topology_list = graph_viewer.GetNodesInTopologicalOrder();
 
-  for (auto node_index : node_topology_list) {
-    auto* node_ptr = graph.GetNode(node_index);
-    if (nullptr == node_ptr)
-      continue;  // node was removed
+    for (auto node_index : node_topology_list) {
+      auto* node_ptr = graph.GetNode(node_index);
+      if (nullptr == node_ptr)
+        continue;  // node was removed
 
-    auto& node = *node_ptr;
+      auto& node = *node_ptr;
 
-    ORT_RETURN_IF_ERROR(Recurse(node, modified, graph_level, logger));
+      ORT_RETURN_IF_ERROR(Recurse(node, modified, graph_level, logger));
+    }
   }
   int pass=0;
   bool local_modified = false;
@@ -604,11 +606,18 @@ Status PropagateCastOps::ApplyImpl(Graph& graph, bool& modified, int graph_level
     if (local_modified) {
       graph.Resolve();
     }
+    GraphViewer graph_viewer(graph);
+    const auto& node_topology_list = graph_viewer.GetNodesInTopologicalOrder();
     std::cout << "resolved" << std::endl;
     local_modified = RemoveUnnecessaryCasts(graph, removed_nodes, logger);
     std::cout << "Done RemovedUnnecessaryCasts" << std::endl;
     // Fuse subgraphs, sibling Cast nodes with same input
-    for (auto& node: graph.Nodes()) {
+    for (auto node_index : node_topology_list) {
+      Node* node_p = graph.GetNode(node_index);
+      if (node_p == nullptr) {
+        continue;
+      }
+      Node& node = *node_p;
       if (std::find(removed_nodes.begin(), removed_nodes.end(), node.Index()) == removed_nodes.end()) {
         local_modified |= FuseSubgraphs(graph, &node, removed_nodes, logger);
       }
@@ -616,7 +625,12 @@ Status PropagateCastOps::ApplyImpl(Graph& graph, bool& modified, int graph_level
     std::cout << "Done FuseSubGraphs" << std::endl;
 
     // Propagate FP32 Casts forward
-    for (Node& node : graph.Nodes()) {
+    for (auto node_index : node_topology_list) {
+      Node* node_p = graph.GetNode(node_index);
+      if (node_p == nullptr) {
+        continue;
+      }
+      Node& node = *node_p;
       if (std::find(removed_nodes.begin(), removed_nodes.end(), node.Index()) == removed_nodes.end()) {
         local_modified |= PropagateForwards(graph, &node, removed_nodes, logger);
       }
@@ -627,7 +641,12 @@ Status PropagateCastOps::ApplyImpl(Graph& graph, bool& modified, int graph_level
     std::cout << "Done RemoveBackToBackCasts" << std::endl;
 
     // Propagate FP16 Casts backward
-    for (Node& node : graph.Nodes()) {
+    for (auto node_index : node_topology_list) {
+      Node* node_p = graph.GetNode(node_index);
+      if (node_p == nullptr) {
+        continue;
+      }
+      Node& node = *node_p;
       if (std::find(removed_nodes.begin(), removed_nodes.end(), node.Index()) == removed_nodes.end()) {
         local_modified |= PropagateBackwards(graph, &node, removed_nodes, logger);
       }
@@ -635,7 +654,12 @@ Status PropagateCastOps::ApplyImpl(Graph& graph, bool& modified, int graph_level
     std::cout << "Done PropagateBackwards" << std::endl;
 
     // Propagate FP16 Casts from outputs to inputs
-    for (Node& node : graph.Nodes()) {
+    for (auto node_index : node_topology_list) {
+      Node* node_p = graph.GetNode(node_index);
+      if (node_p == nullptr) {
+        continue;
+      }
+      Node& node = *node_p;
       if (std::find(removed_nodes.begin(), removed_nodes.end(), node.Index()) == removed_nodes.end()) {
         local_modified |= PropagateFP16CastsFromOutputsToInputs(graph, &node, removed_nodes, logger);
       }
@@ -643,7 +667,12 @@ Status PropagateCastOps::ApplyImpl(Graph& graph, bool& modified, int graph_level
     std::cout << "Done PropagateFP16CastsFromOutputsToInputs" << std::endl;
 
     // Propagate FP32 Casts from inputs to outputs
-    for (Node& node : graph.Nodes()) {
+    for (auto node_index : node_topology_list) {
+      Node* node_p = graph.GetNode(node_index);
+      if (node_p == nullptr) {
+        continue;
+      }
+      Node& node = *node_p;
       if (std::find(removed_nodes.begin(), removed_nodes.end(), node.Index()) == removed_nodes.end()) {
         local_modified |= PropagateFP32CastsFromInputsToOutputs(graph, &node, removed_nodes, logger);
       }
